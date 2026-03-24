@@ -1,0 +1,107 @@
+{
+  "Comment": "Template: Standard ETL pipeline (Extract -> Transform -> Load)",
+  "StartAt": "ExtractPhase",
+  "States": {
+    "ExtractPhase": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ExtractSource1",
+          "States": {
+            "ExtractSource1": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName.$": "$.extract_jobs[0]",
+                "Arguments": {
+                  "--JOB_NAME.$": "$.extract_jobs[0]",
+                  "--source_path.$": "$.source_paths[0]"
+                }
+              },
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.extract_results",
+      "Next": "TransformPhase",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "TransformPhase": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName.$": "$.transform_job",
+        "Arguments": {
+          "--JOB_NAME.$": "$.transform_job"
+        }
+      },
+      "ResultPath": "$.transform_result",
+      "Next": "LoadPhase",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "LoadPhase": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName.$": "$.load_job",
+        "Arguments": {
+          "--JOB_NAME.$": "$.load_job"
+        }
+      },
+      "ResultPath": "$.load_result",
+      "Next": "PipelineSucceeded",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Cause": "Pipeline execution failed",
+      "Error": "PipelineError"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+import json
+import os
+import logging
+
+import boto3
+import pandas as pd
+{% if needs_io_utils %}
+from transform_utils import sas_date_to_pandas, first_last_flags  # noqa: E402
+{% endif %}
+
+logger = logging.getLogger()
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+s3 = boto3.client("s3")
+S3_BUCKET = os.environ.get("S3_BUCKET", "{{ s3_data_bucket }}")
+
+# ---------------------------------------------------------------------------
+# Source: {{ source_file }}
+# Converted: {{ timestamp }}
+# Tier: {{ tier }}
+# ---------------------------------------------------------------------------
+
+
+{% for block in blocks %}
+{{ block }}
+
+{% endfor %}
+
+def handler(event, context):
+    """AWS Lambda entry point.
+
+    Expected event keys:
+        source_path  -- S3 key for input data (optional override)
+        target_path  -- S3 key for output data (optional override)
+    """
+    logger.info("Starting Lambda job for {{ source_file }}")
+    logger.info("Event: %s", json.dumps(event, default=str))
+
+    try:
+        result = main(event)
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Success", "details": result}, default=str),
+        }
+    except Exception:
+        logger.exception("Lambda job failed for {{ source_file }}")
+        raise
+
+
+def main(event):
+    """Business logic entry point — called by handler()."""
+    # The Bedrock-generated transformation code above defines functions
+    # and DataFrames. Orchestrate them here or invoke directly.
+    return {"status": "completed", "source": "{{ source_file }}"}
