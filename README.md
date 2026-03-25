@@ -199,6 +199,91 @@ Add a 1.5-2x multiplier for real-world usage (prompt iteration, re-runs, validat
 
 **Recommended strategy:** use Claude Sonnet 4 for production runs (best code quality, fewer manual fixes) and Nova Lite for pipeline development and prompt iteration.
 
+### AWS Infrastructure Cost Estimate (monthly)
+
+All compute (Glue, Lambda) is **pay-per-use** -- zero cost when idle. Estimates below assume each job runs **once per day** (x 30 days/month) in `eu-west-1`.
+
+**Assumptions:**
+
+- **350 Glue jobs**, each running once/day = 10,500 runs/month, avg 15 min each (= 2,625 total hours)
+- **350 Lambda functions**, each running once/day = 10,500 invocations/month, avg 2 min each, 2048 MB
+- S3 storage: ~100 GB
+
+**Glue cost formula:** `DPUs x total_hours x $0.44/DPU-hr`
+
+where DPUs = workers x DPU_per_worker (G.1X = 1 DPU/worker, G.2X = 2 DPU/worker)
+
+**Glue Jobs -- the dominant cost (350 jobs x 30 days x 15 min = 2,625 hrs/month):**
+
+| Workers | G.1X (1 DPU/worker) | G.2X (2 DPU/worker) |
+|---|---|---|
+| 2 workers | 2 DPU x 2,625 hrs x $0.44 = **$2,310** | 4 DPU x 2,625 hrs x $0.44 = **$4,620** |
+| 5 workers | 5 DPU x 2,625 hrs x $0.44 = **$5,775** | 10 DPU x 2,625 hrs x $0.44 = **$11,550** |
+| 10 workers | 10 DPU x 2,625 hrs x $0.44 = **$11,550** | 20 DPU x 2,625 hrs x $0.44 = **$23,100** |
+| 20 workers | 20 DPU x 2,625 hrs x $0.44 = **$23,100** | 40 DPU x 2,625 hrs x $0.44 = **$46,200** |
+
+**Lambda -- 350 functions x 30 days x 2 min x 2 GB:**
+
+- GB-seconds: 10,500 invocations x 2 GB x 120s = 2,520,000 GB-s
+- Compute: 2,520,000 x $0.0000166667 = **$42.00/month**
+- Requests: 10,500 x $0.20/1M = $0.002 (negligible)
+
+**Other services (validated):**
+
+| Service | Monthly cost | How calculated |
+|---|---|---|
+| S3 (100 GB storage + requests) | ~$3.00 | 100 GB x $0.023 + ~$0.70 requests |
+| Glue Data Catalog (4 databases) | Free | Well under 1M objects |
+| Glue Crawlers (2, ~5 min/run/day) | ~$2.20 | 2 crawlers x 5 min x 30 days = 5 DPU-hrs x $0.44 |
+| Step Functions (state transitions) | ~$1.00 | ~700 jobs in ~7 layers = ~710 transitions/exec x 30 days = ~21K transitions x $0.025/1K |
+| CloudWatch dashboard + alarms | ~$3.20 | 1 dashboard ($3.00) + 2 alarms (2 x $0.10) |
+| CloudWatch Logs (ingestion + storage) | **~$8 - $29** | See breakdown below |
+| SNS (alarm topic) | Free | Under 1M publishes |
+| IAM (roles, policies) | Free | No charge |
+| Lambda Layers | Free | No separate charge |
+| **Other services subtotal** | **~$17 - $38** | |
+
+**CloudWatch Logs breakdown** (Glue has `--enable-continuous-cloudwatch-log`):
+
+| Log source | Runs/month | Log size/run | Volume | Ingestion ($0.50/GB) | Storage ($0.03/GB) |
+|---|---|---|---|---|---|
+| Glue jobs (conservative) | 10,500 | ~1 MB | 10.5 GB | $5.25 | $0.32 |
+| Glue jobs (verbose) | 10,500 | ~5 MB | 52.5 GB | $26.25 | $1.58 |
+| Lambda functions | 10,500 | ~0.5 MB | 5.3 GB | $2.63 | $0.16 |
+| **Total (conservative)** | | | **15.8 GB** | **$7.88** | **$0.47** |
+| **Total (verbose)** | | | **57.8 GB** | **$28.88** | **$1.74** |
+
+Set a CloudWatch Logs retention policy (e.g., 30 days) to cap storage costs. Without retention, logs accumulate and storage grows month over month.
+
+**Monthly total (Glue + Lambda $42 + other services ~$17-$38):**
+
+| Workers | G.1X total | G.2X total |
+|---|---|---|
+| 2 workers | $2,310 + $42 + $28 = **~$2,380** | $4,620 + $42 + $28 = **~$4,690** |
+| 5 workers | $5,775 + $42 + $28 = **~$5,845** | $11,550 + $42 + $28 = **~$11,620** |
+| 10 workers | $11,550 + $42 + $28 = **~$11,620** | $23,100 + $42 + $28 = **~$23,170** |
+| 20 workers | $23,100 + $42 + $28 = **~$23,170** | $46,200 + $42 + $28 = **~$46,270** |
+
+*Totals above use ~$28 for other services (midpoint estimate). Actual range is $17-$38 depending on log verbosity.*
+
+**Key takeaways:**
+
+- **Glue is 97-99% of the total cost.** The worker count and type are the only decisions that matter for budget planning.
+- **Lambda is cheap** -- $42/month for 10,500 daily invocations at 2 GB. Moving more scripts from Glue to Lambda is the single biggest cost optimization.
+- **CloudWatch Logs are the second-largest cost** after Glue compute at $8-$29/month. Set a 30-day retention policy and consider disabling continuous logging for stable jobs.
+- **Worker count is per-job, not shared.** Each Glue job run allocates its own workers for its duration. 2 workers at 15 min/job is the minimum viable config.
+- **G.1X vs G.2X:** G.2X doubles the DPU (and cost) per worker but provides 2x memory (16 GB vs 8 GB). Use G.1X unless jobs run out of memory.
+- All prices exclude AWS free-tier credits (first 12 months: 1M Lambda requests, 400K GB-s, 5 GB S3, etc.).
+
+**Calculate your own costs:**
+
+- [AWS Pricing Calculator](https://calculator.aws/) -- build a custom estimate for your exact workload
+- [AWS Glue Pricing](https://aws.amazon.com/glue/pricing/) -- $0.44/DPU-hour, billed per second (1-min minimum)
+- [AWS Lambda Pricing](https://aws.amazon.com/lambda/pricing/) -- $0.0000166667/GB-second + $0.20 per 1M requests
+- [AWS CloudWatch Pricing](https://aws.amazon.com/cloudwatch/pricing/) -- $0.50/GB log ingestion, $0.03/GB-month storage
+- [AWS Step Functions Pricing](https://aws.amazon.com/step-functions/pricing/) -- $0.025 per 1K state transitions
+- [AWS S3 Pricing](https://aws.amazon.com/s3/pricing/) -- $0.023/GB-month (Standard), $0.005/1K PUT requests
+
 ### Data Sources
 
 The toolkit supports three categories of data sources. The SAS parser detects which source type each script uses (database LIBNAME vs file-based LIBNAME vs PROC IMPORT DBMS=XLSX) and the Bedrock prompts include source-specific mapping rules so generated code uses the correct I/O helpers.
