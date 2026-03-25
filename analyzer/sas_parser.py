@@ -127,6 +127,17 @@ _PROC_TYPE_MAP = {
     "TABULATE": BlockType.PROC_TABULATE,
 }
 
+_DB_ENGINE_PATTERN = re.compile(
+    r"\b(DB2|ODBC|OLEDB|ORACLE|TERADATA|SQLSERVR|MYSQL|POSTGRES)\b",
+    re.IGNORECASE,
+)
+_CONNECT_TO_PATTERN = re.compile(
+    r"\bCONNECT\s+TO\s+(\w+)", re.IGNORECASE
+)
+_DBMS_PATTERN = re.compile(
+    r"\bDBMS\s*=\s*(\w+)", re.IGNORECASE
+)
+
 _SAS_BUILTINS = {"_null_", "_data_", "_last_", "_all_"}
 
 
@@ -243,6 +254,17 @@ def _parse_proc(match: re.Match, full_text: str) -> SASBlock:
         sql_out, sql_in = _extract_sql_tables(body)
         outputs.extend(sql_out)
         inputs.extend(sql_in)
+        connect_m = _CONNECT_TO_PATTERN.search(body)
+        if connect_m:
+            attrs["has_connect_to"] = True
+            attrs["connect_engine"] = connect_m.group(1).upper()
+
+    if block_type == BlockType.PROC_IMPORT:
+        dbms_m = _DBMS_PATTERN.search(body)
+        if dbms_m:
+            attrs["dbms"] = dbms_m.group(1).upper()
+            if attrs["dbms"] in ("XLSX", "XLS", "EXCEL"):
+                attrs["is_excel"] = True
 
     return SASBlock(
         block_type=block_type,
@@ -272,16 +294,22 @@ def parse_sas_file(file_path: str | Path) -> ParseResult:
     cleaned = _LINE_COMMENT.sub("", cleaned)
 
     for m in _LIBNAME_PATTERN.finditer(cleaned):
+        lib_body = m.group(2).strip()
+        attrs: dict = {
+            "lib_name": m.group(1).lower(),
+            "lib_path": lib_body,
+        }
+        db_engine_m = _DB_ENGINE_PATTERN.search(lib_body)
+        if db_engine_m:
+            attrs["db_engine"] = db_engine_m.group(1).upper()
+            attrs["is_database"] = True
         result.blocks.append(
             SASBlock(
                 block_type=BlockType.LIBNAME,
                 raw_text=m.group(0),
                 start_line=_line_number_at(cleaned, m.start()),
                 end_line=_line_number_at(cleaned, m.end()),
-                attributes={
-                    "lib_name": m.group(1).lower(),
-                    "lib_path": m.group(2).strip(),
-                },
+                attributes=attrs,
             )
         )
 

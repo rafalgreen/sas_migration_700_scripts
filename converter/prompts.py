@@ -49,8 +49,22 @@ sas_missing(col)                   – SAS MISSING()
 sas_coalesce(*cols)                – SAS COALESCE
 ```
 
+**I/O helpers** (from `io_utils`, already importable):
+
+```
+get_db_credentials(secret_name)    – fetch DB host/port/user/pass from Secrets Manager
+read_jdbc(spark, table, secret_name, driver=None, fetch_size=10000)
+                                   – read a DB2 or MSSQL table via JDBC
+read_excel(spark, s3_path, sheet_name=0, header=0)
+                                   – read an Excel file from S3 into a Spark DataFrame
+read_s3_csv(spark, s3_path, header=True, delimiter=",")
+read_s3_parquet(spark, s3_path)
+read_glue_table(spark, database, table)
+```
+
 Import any of these as needed:
 `from transform_utils import sas_date_to_spark, first_last_flags  # etc.`
+`from io_utils import read_jdbc, read_excel, get_db_credentials  # etc.`
 
 ## SAS-to-PySpark mapping rules
 
@@ -91,7 +105,16 @@ Import any of these as needed:
 
 ### PROC IMPORT / EXPORT
 - `DATAFILE="..." DBMS=CSV` → `spark.read.option("header","true").csv(...)`
+- `DATAFILE="..." DBMS=XLSX` or `DBMS=XLS` → `read_excel(spark, "s3://<bucket>/<path>.xlsx")`
 - `OUTFILE="..." DBMS=CSV` → `df.write.option("header","true").csv(...)`
+
+### Database LIBNAMEs (DB2 / MSSQL / ODBC)
+- `LIBNAME <lib> DB2 DATABASE=<db> ...` → `read_jdbc(spark, "<schema>.<table>", "<secret_name>")`
+- `LIBNAME <lib> ODBC DSN=<dsn> ...` → `read_jdbc(spark, "<schema>.<table>", "<secret_name>")`
+- `LIBNAME <lib> OLEDB ...` → `read_jdbc(spark, "<schema>.<table>", "<secret_name>")`
+- When you see a database LIBNAME, use `read_jdbc()` to read each table accessed from that library.
+  The `secret_name` follows the pattern `"sas-migration/<lib>-credentials"`.
+- `PROC SQL; CONNECT TO <engine> (...)` → `read_jdbc(spark, "<query_or_table>", "<secret_name>")`
 
 ### Macros
 - `%MACRO name(...); ... %MEND;` → Convert to a Python function.
@@ -200,8 +223,19 @@ sas_missing(series)                – SAS MISSING()
 sas_coalesce(*series)              – SAS COALESCE
 ```
 
+**I/O helpers** (from `io_utils`, already importable):
+
+```
+get_db_credentials(secret_name)    – fetch DB host/port/user/pass from Secrets Manager
+read_db(query_or_table, secret_name)
+                                   – read a DB2 or MSSQL table into pandas via SQLAlchemy
+read_excel(s3_path, sheet_name=0, header=0)
+                                   – read an Excel file from S3 into a pandas DataFrame
+```
+
 Import any of these as needed:
 `from transform_utils import sas_date_to_pandas, first_last_flags  # etc.`
+`from io_utils import read_db, read_excel, get_db_credentials  # etc.`
 
 ## SAS-to-pandas mapping rules
 
@@ -241,7 +275,16 @@ Import any of these as needed:
 
 ### PROC IMPORT / EXPORT
 - `DATAFILE="..." DBMS=CSV` → `pd.read_csv(...)`
+- `DATAFILE="..." DBMS=XLSX` or `DBMS=XLS` → `read_excel("s3://<bucket>/<path>.xlsx")`
 - `OUTFILE="..." DBMS=CSV` → `df.to_csv(...)`
+
+### Database LIBNAMEs (DB2 / MSSQL / ODBC)
+- `LIBNAME <lib> DB2 DATABASE=<db> ...` → `read_db("<schema>.<table>", "<secret_name>")`
+- `LIBNAME <lib> ODBC DSN=<dsn> ...` → `read_db("<schema>.<table>", "<secret_name>")`
+- `LIBNAME <lib> OLEDB ...` → `read_db("<schema>.<table>", "<secret_name>")`
+- When you see a database LIBNAME, use `read_db()` to read each table accessed from that library.
+  The `secret_name` follows the pattern `"sas-migration/<lib>-credentials"`.
+- `PROC SQL; CONNECT TO <engine> (...)` → `read_db("<query>", "<secret_name>")`
 
 ### Macros
 - `%MACRO name(...); ... %MEND;` → Convert to a Python function.

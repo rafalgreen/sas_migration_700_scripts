@@ -15,6 +15,9 @@ from pyspark.sql.types import (
 # Shared SAS-compatibility utilities
 sys.path.insert(0, "s3://{{ s3_scripts_bucket }}/common/")
 from transform_utils import sas_date_to_spark, first_last_flags  # noqa: E402
+{% if needs_db_io %}
+from io_utils import read_jdbc, read_excel, get_db_credentials  # noqa: E402
+{% endif %}
 
 args = getResolvedOptions(sys.argv, ["JOB_NAME"{{ extra_args }}])
 sc = SparkContext()

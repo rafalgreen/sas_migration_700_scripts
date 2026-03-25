@@ -75,7 +75,16 @@ Automated migration of 700 SAS ETL scripts to AWS **Glue (PySpark)** or **Lambda
                               | Lambda Fns (pandas / Python)   |
                               | Step Functions (orchestration) |
                               | CloudWatch (dashboards+alarms) |
-                              +--------------------------------+
+                              +-------+----------------+-------+
+                                      |                |
+                  +-------------------v--+    +--------v-----------+
+                  |    Data Sources      |    | Infrastructure     |
+                  |                      |    |                    |
+                  | DB2 (JDBC)           |    | VPC + Subnets      |
+                  | MSSQL Server (JDBC)  |    | Secrets Manager    |
+                  | CSV / Excel on S3    |    | Glue Connections   |
+                  +----------------------+    | VPC Endpoints      |
+                                              +--------------------+
                                              |
                                    +---------v---------+
                                    |   validation/     |
@@ -190,6 +199,53 @@ Add a 1.5-2x multiplier for real-world usage (prompt iteration, re-runs, validat
 
 **Recommended strategy:** use Claude Sonnet 4 for production runs (best code quality, fewer manual fixes) and Nova Lite for pipeline development and prompt iteration.
 
+### Data Sources
+
+The toolkit supports three categories of data sources. The SAS parser detects which source type each script uses (database LIBNAME vs file-based LIBNAME vs PROC IMPORT DBMS=XLSX) and the Bedrock prompts include source-specific mapping rules so generated code uses the correct I/O helpers.
+
+| Source | SAS Pattern | Glue (PySpark) | Lambda (pandas) |
+|---|---|---|---|
+| **DB2** | `LIBNAME lib DB2 DATABASE=...` | `read_jdbc(spark, table, secret_name)` via JDBC driver | `read_db(table, secret_name)` via SQLAlchemy + `ibm_db` |
+| **MSSQL Server** | `LIBNAME lib ODBC DSN=...` | `read_jdbc(spark, table, secret_name)` via JDBC driver | `read_db(table, secret_name)` via SQLAlchemy + `pymssql` |
+| **CSV on S3** | `PROC IMPORT DBMS=CSV` | `read_s3_csv(spark, s3_path)` | `pd.read_csv(s3_path)` |
+| **Excel on S3** | `PROC IMPORT DBMS=XLSX` | `read_excel(spark, s3_path)` (pandas intermediate) | `read_excel(s3_path)` via `openpyxl` |
+| **Parquet on S3** | (post-migration format) | `read_s3_parquet(spark, s3_path)` | `pd.read_parquet(s3_path)` |
+
+**Database credentials** are stored in AWS Secrets Manager with this JSON structure:
+
+```json
+{
+  "engine": "mssql",
+  "host": "db.example.com",
+  "port": 1433,
+  "database": "mydb",
+  "username": "svc_etl",
+  "password": "..."
+}
+```
+
+Both Glue and Lambda I/O utilities call `get_db_credentials(secret_name)` at runtime to fetch connection details. Secret names follow the convention `sas-migration-<env>/<db>-credentials`.
+
+**Infrastructure required for database connectivity:**
+
+- **VPC** with private subnets (Glue Connections and Lambda need network access to database hosts)
+- **NAT Gateway** (Lambda in VPC needs it for S3 and Secrets Manager access)
+- **VPC Endpoints** for S3 and Secrets Manager (cost optimization, avoids NAT for AWS service traffic)
+- **Glue JDBC Connections** for DB2 and MSSQL (configured in Terraform with `enable_db2`/`enable_mssql` flags)
+- **Lambda Layer** with database drivers (`pymssql`, `sqlalchemy`, `openpyxl`)
+
+Enable database sources in Terraform:
+
+```bash
+terraform apply -var-file=environments/dev.tfvars \
+  -var="enable_vpc=true" \
+  -var="enable_mssql=true" \
+  -var="mssql_host=db.example.com" \
+  -var="mssql_database=mydb" \
+  -var="mssql_username=svc_etl" \
+  -var="mssql_password=secret"
+```
+
 ### Phase 3 -- Shared Utilities (SAS compatibility layer)
 
 Two parallel runtime libraries provide SAS-equivalent helper functions — one for PySpark (Glue), one for pandas (Lambda). Both expose the **same function names** so the Bedrock prompt can reference a single API regardless of the target.
@@ -201,7 +257,7 @@ Two parallel runtime libraries provide SAS-equivalent helper functions — one f
   - `first_last_flags()` -- Adds `_first_<var>` / `_last_<var>` boolean columns via window functions
   - `retain_accumulate()` -- Running totals within partitions via `Window.partitionBy().orderBy()`
   - SAS function equivalents: `sas_substr`, `sas_compress`, `sas_catx`, `sas_intck`, `sas_intnx`, `sas_missing`
-- **`io_utils.py`**: S3 read/write helpers for Parquet and CSV, Glue catalog table access
+- **`io_utils.py`**: S3 read/write (Parquet, CSV), Glue catalog access, `read_jdbc()` for DB2/MSSQL via JDBC, `read_excel()` for Excel on S3, `get_db_credentials()` from Secrets Manager
 - **`quality_utils.py`**: Null summary, type coercion, deduplication, audit columns
 - **`logging_utils.py`**: Structured JSON logging for CloudWatch Logs
 
@@ -212,6 +268,7 @@ Two parallel runtime libraries provide SAS-equivalent helper functions — one f
   - `first_last_flags()` -- Adds `_first_<var>` / `_last_<var>` columns via shift-based group detection
   - `retain_accumulate()` -- Running totals via `groupby().cumsum()`
   - Same SAS function equivalents using pandas `str` accessors, `pd.to_numeric`, and `pd.DateOffset`
+- **`io_utils.py`**: `read_db()` for DB2/MSSQL via SQLAlchemy, `read_excel()` for Excel on S3 via openpyxl, `get_db_credentials()` from Secrets Manager
 
 ### Phase 4 -- Infrastructure as Code (Terraform)
 
@@ -225,12 +282,28 @@ Two parallel runtime libraries provide SAS-equivalent helper functions — one f
 **`glue.tf`** -- Jobs + IAM:
 - IAM role for Glue with least-privilege inline policies (S3 read/write, Glue catalog, CloudWatch logs) + `AWSGlueServiceRole` managed policy
 - Glue job definition (glueetl, Python 3, Glue 4.0, configurable worker type/count, Spark UI enabled)
+- Glue JDBC Connections for DB2 and MSSQL (conditional via `enable_db2`/`enable_mssql`)
+- Secrets Manager IAM policy for database credentials
+- JDBC driver JARs (`mssql-jdbc`, `db2jcc4`) passed via `--extra-jars`
 - Crawlers for raw and processed S3 zones (auto-discover schemas)
 
 **`lambda.tf`** -- Lambda:
 - IAM role for Lambda with S3 read/write, CloudWatch Logs, and Glue Catalog read permissions
 - Lambda layer for pandas, numpy, s3fs, and pyarrow (Python 3.12)
-- Lambda function definition (15min timeout, configurable memory, pandas layer attached)
+- Lambda layer for database drivers (`pymssql`, `sqlalchemy`, `openpyxl`) -- conditional
+- VPC configuration (subnet IDs, security group) for database connectivity
+- Secrets Manager IAM policy for database credentials
+- Lambda function definition (15min timeout, configurable memory, layers attached)
+
+**`secrets.tf`** -- Secrets Manager:
+- Secret resources for DB2 and MSSQL credentials (conditional via `enable_db2`/`enable_mssql`)
+- JSON structure: `{engine, host, port, database, username, password}`
+
+**`networking.tf`** -- VPC (conditional via `enable_vpc`):
+- VPC with private subnets across 2 AZs
+- Internet Gateway + NAT Gateway for Lambda outbound access
+- VPC Endpoints for S3 (Gateway) and Secrets Manager (Interface)
+- Security groups for Glue, Lambda, and VPC endpoints
 
 **`orchestration.tf`** -- Step Functions:
 - IAM role for Step Functions with Glue start/stop, Lambda invoke, and SNS publish permissions
@@ -313,7 +386,7 @@ git push
 [Lint] ruff check + ruff format --check + terraform fmt -check + terraform validate
     |
     v
-[Test] pytest (analyzer + converter + validation tests, 89 tests)
+[Test] pytest (analyzer + converter + validation tests, 114 tests)
     |
     v
 [Deploy Dev]  (on push to develop)
@@ -342,6 +415,7 @@ claude_46_opus_high/
         cli.py                  # sas-analyze CLI
         tests/
             test_analyzer.py    # 15 tests (parser, classifier, graph)
+            test_db_sources.py  # 22 tests (DB LIBNAME detection, prompt content, io_utils)
     converter/
         transpiler.py           # Core engine: parse -> Bedrock -> assemble (glue/lambda)
         bedrock_converter.py    # AWS Bedrock Converse API client + retry logic
@@ -357,21 +431,24 @@ claude_46_opus_high/
     glue_jobs/
         common/
             transform_utils.py  # PySpark: SAS date, RETAIN, FIRST/LAST, INTCK/INTNX
-            io_utils.py         # S3 + Glue catalog I/O
+            io_utils.py         # S3, Glue catalog, JDBC (DB2/MSSQL), Excel I/O
             quality_utils.py    # Nulls, types, dedup, audit columns
             logging_utils.py    # Structured JSON logging for CloudWatch
         jobs/                   # Generated PySpark Glue jobs land here
     lambda_jobs/
         common/
             transform_utils.py  # pandas: SAS date, RETAIN, FIRST/LAST, INTCK/INTNX
+            io_utils.py         # DB2/MSSQL (SQLAlchemy), Excel (openpyxl), Secrets Manager
         handlers/               # Generated pandas Lambda handlers land here
     infrastructure/
         main.tf                 # Provider, backend, locals
-        variables.tf            # Environment variables
+        variables.tf            # Environment variables (inc. DB/VPC config)
         outputs.tf              # Exported resource IDs/ARNs
         data_lake.tf            # S3 buckets + Glue catalog databases
-        glue.tf                 # Glue IAM role + job + crawlers
-        lambda.tf               # Lambda IAM role + function + pandas layer
+        glue.tf                 # Glue IAM + job + crawlers + JDBC connections
+        lambda.tf               # Lambda IAM + function + pandas/db layers + VPC
+        secrets.tf              # Secrets Manager for DB2/MSSQL credentials
+        networking.tf           # VPC, subnets, NAT, VPC endpoints, security groups
         orchestration.tf        # Step Functions IAM + state machine (Glue + Lambda)
         monitoring.tf           # SNS + CloudWatch dashboard + alarms
         environments/
@@ -440,12 +517,14 @@ sas-validate compare --sas-output golden/ --spark-output s3://bucket/processed/ 
 
 ## Test Suite
 
-89 tests covering the analyzer, Bedrock converter, transpiler, Lambda target, and DataComPy validation:
+114 tests covering the analyzer, Bedrock converter, transpiler, Lambda target, DataComPy validation, and database source detection:
 
 ```bash
 python -m pytest analyzer/tests/ converter/tests/ validation/tests/ -v
+# 114 tests total (15 analyzer + 25 data sources + 30 bedrock + 12 transpiler + 16 lambda + 16 validation)
 ```
 
+- **Data source tests (22)**: DB2/ODBC LIBNAME detection in parser, PROC IMPORT DBMS=XLSX detection, PROC SQL CONNECT TO detection, Bedrock prompt content for database helpers (Glue + Lambda), Glue `io_utils` import verification (`read_jdbc`, `read_excel`, `get_db_credentials`), Lambda `io_utils` import verification (`read_db`, `read_excel`, `get_db_credentials`), `build_connection_url` for MSSQL/DB2, unsupported engine error handling.
 - **Analyzer tests (15)**: SAS parsing of DATA steps, PROC SQL, MERGE, RETAIN, FIRST./LAST., macros, arrays, %INCLUDE; GREEN/YELLOW/RED classification accuracy; dependency graph construction.
 - **Bedrock converter tests (30)**: Model registry, prompt construction (SAS code inclusion, metadata, few-shot examples), code extraction from markdown fences, syntax validation, mocked Converse API integration (throttle retry, syntax error retry, retry exhaustion, non-retryable errors), end-to-end transpile with mocked Bedrock (single file, batch directory, valid Python output, graceful failure).
 - **Transpiler tests (12)**: End-to-end conversion of simple/medium/complex SAS scripts with mocked Bedrock responses; Glue boilerplate presence; filter/orderBy/join generation; Python syntax validity of all generated code.

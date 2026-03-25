@@ -132,6 +132,70 @@ resource "aws_iam_role_policy" "glue_bedrock" {
 }
 
 # -----------------------------------------------------------------------------
+# Secrets Manager access (for JDBC credentials)
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role_policy" "glue_secrets" {
+  count = (var.enable_db2 || var.enable_mssql) ? 1 : 0
+  name  = "secrets-manager-access"
+  role  = aws_iam_role.glue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+        ]
+        Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${local.project_prefix}/*"
+      }
+    ]
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Glue JDBC Connections
+# -----------------------------------------------------------------------------
+
+resource "aws_glue_connection" "mssql" {
+  count           = (var.enable_mssql && var.enable_vpc) ? 1 : 0
+  name            = "${local.project_prefix}-mssql"
+  connection_type = "JDBC"
+
+  connection_properties = {
+    JDBC_CONNECTION_URL = "jdbc:sqlserver://${var.mssql_host}:${var.mssql_port};databaseName=${var.mssql_database}"
+    USERNAME            = var.mssql_username
+    PASSWORD            = var.mssql_password
+  }
+
+  physical_connection_requirements {
+    availability_zone      = var.availability_zones[0]
+    subnet_id              = aws_subnet.private[0].id
+    security_group_id_list = [aws_security_group.glue[0].id]
+  }
+}
+
+resource "aws_glue_connection" "db2" {
+  count           = (var.enable_db2 && var.enable_vpc) ? 1 : 0
+  name            = "${local.project_prefix}-db2"
+  connection_type = "JDBC"
+
+  connection_properties = {
+    JDBC_CONNECTION_URL = "jdbc:db2://${var.db2_host}:${var.db2_port}/${var.db2_database}"
+    USERNAME            = var.db2_username
+    PASSWORD            = var.db2_password
+  }
+
+  physical_connection_requirements {
+    availability_zone      = var.availability_zones[0]
+    subnet_id              = aws_subnet.private[0].id
+    security_group_id_list = [aws_security_group.glue[0].id]
+  }
+}
+
+# -----------------------------------------------------------------------------
 # Glue Job
 # -----------------------------------------------------------------------------
 
@@ -151,15 +215,25 @@ resource "aws_glue_job" "etl_sample" {
   max_retries       = 1
   timeout           = var.glue_job_timeout
 
-  default_arguments = {
-    "--job-language"                        = "python"
-    "--enable-metrics"                      = "true"
-    "--enable-continuous-cloudwatch-log"     = "true"
-    "--enable-spark-ui"                     = "true"
-    "--spark-event-logs-path"               = "s3://${aws_s3_bucket.scripts.id}/spark-logs/"
-    "--extra-py-files"                      = "s3://${aws_s3_bucket.scripts.id}/common/common_utils.zip"
-    "--TempDir"                             = "s3://${aws_s3_bucket.scripts.id}/temp/"
-  }
+  connections = compact([
+    var.enable_mssql && var.enable_vpc ? aws_glue_connection.mssql[0].name : "",
+    var.enable_db2 && var.enable_vpc ? aws_glue_connection.db2[0].name : "",
+  ])
+
+  default_arguments = merge(
+    {
+      "--job-language"                    = "python"
+      "--enable-metrics"                  = "true"
+      "--enable-continuous-cloudwatch-log" = "true"
+      "--enable-spark-ui"                 = "true"
+      "--spark-event-logs-path"           = "s3://${aws_s3_bucket.scripts.id}/spark-logs/"
+      "--extra-py-files"                  = "s3://${aws_s3_bucket.scripts.id}/common/common_utils.zip"
+      "--TempDir"                         = "s3://${aws_s3_bucket.scripts.id}/temp/"
+    },
+    (var.enable_mssql || var.enable_db2) ? {
+      "--extra-jars" = "s3://${aws_s3_bucket.scripts.id}/jars/mssql-jdbc-12.4.2.jcc.jar,s3://${aws_s3_bucket.scripts.id}/jars/db2jcc4.jar"
+    } : {},
+  )
 }
 
 # -----------------------------------------------------------------------------

@@ -7,6 +7,9 @@ import pandas as pd
 {% if needs_io_utils %}
 from transform_utils import sas_date_to_pandas, first_last_flags  # noqa: E402
 {% endif %}
+{% if needs_db_io %}
+from io_utils import read_db, read_excel, get_db_credentials  # noqa: E402
+{% endif %}
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
