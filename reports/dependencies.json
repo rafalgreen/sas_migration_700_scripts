@@ -1,20 +1,42 @@
 {
   "nodes": [
     "sas_source/sample_complex.sas",
+    "sas_source/sample_db_sources.sas",
+    "sas_source/sample_downstream.sas",
     "sas_source/sample_medium.sas",
-    "sas_source/sample_proc_sql.sas",
     "sas_source/sample_simple.sas"
   ],
-  "edges": [],
+  "edges": [
+    {
+      "source": "sas_source/sample_medium.sas",
+      "target": "sas_source/sample_downstream.sas",
+      "shared_datasets": [
+        "work.customer_running_total",
+        "work.tier_stats"
+      ],
+      "type": "data"
+    },
+    {
+      "source": "sas_source/sample_simple.sas",
+      "target": "sas_source/sample_downstream.sas",
+      "shared_datasets": [
+        "work.region_summary"
+      ],
+      "type": "data"
+    }
+  ],
   "execution_order": [
     "sas_source/sample_complex.sas",
+    "sas_source/sample_db_sources.sas",
     "sas_source/sample_medium.sas",
-    "sas_source/sample_proc_sql.sas",
-    "sas_source/sample_simple.sas"
+    "sas_source/sample_simple.sas",
+    "sas_source/sample_downstream.sas"
   ],
   "orphan_datasets": [
-    "lib.customers",
-    "lib.orders",
+    "connection",
+    "db2",
+    "dbo.orders",
+    "dwh.customers",
     "mylib.customers",
     "raw.customer_dim",
     "raw.transactions",

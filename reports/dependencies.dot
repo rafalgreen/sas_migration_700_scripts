@@ -1,7 +1,10 @@
 digraph sas_dependencies {
   rankdir="LR";
   "sample_complex";
+  "sample_db_sources";
+  "sample_downstream";
   "sample_medium";
-  "sample_proc_sql";
   "sample_simple";
+  "sample_medium" -> "sample_downstream" [label="work.customer_running_total, work.tier_stats"];
+  "sample_simple" -> "sample_downstream" [label="work.region_summary"];
 }

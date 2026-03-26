@@ -7,7 +7,9 @@ construct distributions, and dependency information.
 from __future__ import annotations
 
 import csv
+import html
 import io
+import re
 from pathlib import Path
 
 from analyzer.classifier import Classification, Tier
@@ -105,6 +107,44 @@ def generate_summary(classifications: list[Classification]) -> dict:
     }
 
 
+def _mermaid_safe(text: str) -> str:
+    """Escape characters that break Mermaid label syntax."""
+    return re.sub(r'["\[\]{}()<>|#&;]', lambda m: f"#{ord(m.group()):d};", text)
+
+
+def _build_mermaid_graph(
+    graph: DependencyGraph,
+    tier_map: dict[str, str],
+) -> str:
+    """Convert a DependencyGraph into a Mermaid flowchart definition."""
+    lines = ["flowchart LR"]
+
+    for node in graph.nodes:
+        stem = Path(node).stem
+        node_id = re.sub(r"\W", "_", stem)
+        tier = tier_map.get(node, "")
+        label = f"{stem} ({tier})" if tier else stem
+        lines.append(f'  {node_id}["{_mermaid_safe(label)}"]')
+
+    if graph.edges:
+        for edge in graph.edges:
+            src_id = re.sub(r"\W", "_", Path(edge.source_file).stem)
+            tgt_id = re.sub(r"\W", "_", Path(edge.target_file).stem)
+            if edge.shared_datasets:
+                label = ", ".join(edge.shared_datasets[:3])
+                if len(edge.shared_datasets) > 3:
+                    label += f" +{len(edge.shared_datasets) - 3}"
+                lines.append(f'  {src_id} -->|"{_mermaid_safe(label)}"| {tgt_id}')
+            elif edge.edge_type == "include":
+                lines.append(f"  {src_id} -.->|include| {tgt_id}")
+            else:
+                lines.append(f"  {src_id} --> {tgt_id}")
+    else:
+        lines.append("  no_deps[No inter-script dependencies detected]")
+
+    return "\n".join(lines)
+
+
 def generate_html(
     classifications: list[Classification],
     graph: DependencyGraph | None,
@@ -146,9 +186,21 @@ tr:hover { background: #f1f5f9; }
 .construct { background: white; border-radius: 6px; padding: 0.5rem 1rem;
              box-shadow: 0 1px 2px rgba(0,0,0,0.08); font-size: 0.85rem; }
 .construct .cnt { font-weight: 700; color: #3b82f6; }
+.graph-container { background: white; border-radius: 8px; padding: 1.5rem;
+                   box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;
+                   overflow-x: auto; }
+.exec-order { list-style: decimal; padding-left: 1.5rem; }
+.exec-order li { padding: 0.25rem 0; font-size: 0.875rem; }
+.exec-order code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 3px; }
 """
     )
-    buf.write("</style></head><body>\n")
+    buf.write("</style>\n")
+    buf.write(
+        "<script src='https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'></script>\n"
+        "<script>mermaid.initialize({startOnLoad:true, theme:'neutral', "
+        "securityLevel:'loose'});</script>\n"
+    )
+    buf.write("</head><body>\n")
     buf.write("<h1>SAS Migration Inventory Report</h1>\n")
 
     buf.write("<div class='cards'>\n")
@@ -178,6 +230,21 @@ tr:hover { background: #f1f5f9; }
         ):
             buf.write(f"<div class='construct'>{flag}: <span class='cnt'>{count}</span></div>\n")
         buf.write("</div>\n")
+
+    if graph:
+        tier_map = {c.file_path: c.tier.value for c in classifications}
+        mermaid_def = _build_mermaid_graph(graph, tier_map)
+        buf.write("<h2>Dependency Graph</h2>\n")
+        buf.write("<div class='graph-container'>\n")
+        buf.write(f"<pre class='mermaid'>\n{html.escape(mermaid_def)}\n</pre>\n")
+        buf.write("</div>\n")
+
+        if graph.execution_order:
+            buf.write("<h2>Execution Order</h2>\n")
+            buf.write("<ol class='exec-order'>\n")
+            for step in graph.execution_order:
+                buf.write(f"<li><code>{html.escape(Path(step).stem)}</code></li>\n")
+            buf.write("</ol>\n")
 
     buf.write("<h2>Script Inventory</h2>\n")
     buf.write("<table><thead><tr>")

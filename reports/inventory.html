@@ -24,54 +24,88 @@ tr:hover { background: #f1f5f9; }
 .construct { background: white; border-radius: 6px; padding: 0.5rem 1rem;
              box-shadow: 0 1px 2px rgba(0,0,0,0.08); font-size: 0.85rem; }
 .construct .cnt { font-weight: 700; color: #3b82f6; }
-</style></head><body>
+.graph-container { background: white; border-radius: 8px; padding: 1.5rem;
+                   box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;
+                   overflow-x: auto; }
+.exec-order { list-style: decimal; padding-left: 1.5rem; }
+.exec-order li { padding: 0.25rem 0; font-size: 0.875rem; }
+.exec-order code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 3px; }
+</style>
+<script src='https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'neutral', securityLevel:'loose'});</script>
+</head><body>
 <h1>SAS Migration Inventory Report</h1>
 <div class='cards'>
-<div class='card'><div class='number' style='color:#3b82f6'>4</div><div class='label'>Total Scripts</div></div>
-<div class='card'><div class='number' style='color:#22c55e'>2 (50.0%)</div><div class='label'>GREEN (auto)</div></div>
-<div class='card'><div class='number' style='color:#eab308'>1 (25.0%)</div><div class='label'>YELLOW (semi)</div></div>
-<div class='card'><div class='number' style='color:#ef4444'>1 (25.0%)</div><div class='label'>RED (manual)</div></div>
-<div class='card'><div class='number' style='color:#8b5cf6'>177</div><div class='label'>Total Lines</div></div>
-<div class='card'><div class='number' style='color:#6366f1'>44.2</div><div class='label'>Avg Lines/Script</div></div>
+<div class='card'><div class='number' style='color:#3b82f6'>5</div><div class='label'>Total Scripts</div></div>
+<div class='card'><div class='number' style='color:#22c55e'>3 (60.0%)</div><div class='label'>GREEN (auto)</div></div>
+<div class='card'><div class='number' style='color:#eab308'>1 (20.0%)</div><div class='label'>YELLOW (semi)</div></div>
+<div class='card'><div class='number' style='color:#ef4444'>1 (20.0%)</div><div class='label'>RED (manual)</div></div>
+<div class='card'><div class='number' style='color:#8b5cf6'>215</div><div class='label'>Total Lines</div></div>
+<div class='card'><div class='number' style='color:#6366f1'>43.0</div><div class='label'>Avg Lines/Script</div></div>
 </div>
 <h2>Construct Distribution</h2>
 <div class='constructs'>
-<div class='construct'>LIBNAME: <span class='cnt'>6</span></div>
-<div class='construct'>DATA_STEP: <span class='cnt'>5</span></div>
-<div class='construct'>PROC_SQL: <span class='cnt'>4</span></div>
+<div class='construct'>LIBNAME: <span class='cnt'>8</span></div>
+<div class='construct'>DATA_STEP: <span class='cnt'>8</span></div>
+<div class='construct'>PROC_SQL: <span class='cnt'>5</span></div>
 <div class='construct'>INCLUDE: <span class='cnt'>3</span></div>
 <div class='construct'>MACRO_DEF: <span class='cnt'>2</span></div>
 <div class='construct'>PROC_SORT: <span class='cnt'>2</span></div>
 <div class='construct'>PROC_TRANSPOSE: <span class='cnt'>1</span></div>
 <div class='construct'>PROC_APPEND: <span class='cnt'>1</span></div>
+<div class='construct'>PROC_IMPORT: <span class='cnt'>1</span></div>
 <div class='construct'>PROC_MEANS: <span class='cnt'>1</span></div>
 </div>
 <h2>Complexity Flags</h2>
 <div class='constructs'>
-<div class='construct'>has_keep: <span class='cnt'>2</span></div>
-<div class='construct'>has_where: <span class='cnt'>2</span></div>
+<div class='construct'>has_where: <span class='cnt'>4</span></div>
+<div class='construct'>has_keep: <span class='cnt'>3</span></div>
 <div class='construct'>has_retain: <span class='cnt'>2</span></div>
 <div class='construct'>has_first_last: <span class='cnt'>2</span></div>
 <div class='construct'>has_output_stmt: <span class='cnt'>2</span></div>
 <div class='construct'>has_if_then: <span class='cnt'>2</span></div>
 <div class='construct'>has_drop: <span class='cnt'>2</span></div>
+<div class='construct'>has_merge: <span class='cnt'>2</span></div>
 <div class='construct'>has_array: <span class='cnt'>1</span></div>
 <div class='construct'>has_do_loop: <span class='cnt'>1</span></div>
-<div class='construct'>has_merge: <span class='cnt'>1</span></div>
 <div class='construct'>has_format: <span class='cnt'>1</span></div>
 <div class='construct'>has_rename: <span class='cnt'>1</span></div>
 </div>
+<h2>Dependency Graph</h2>
+<div class='graph-container'>
+<pre class='mermaid'>
+flowchart LR
+  sample_complex[&quot;sample_complex #40;RED#41;&quot;]
+  sample_db_sources[&quot;sample_db_sources #40;GREEN#41;&quot;]
+  sample_downstream[&quot;sample_downstream #40;GREEN#41;&quot;]
+  sample_medium[&quot;sample_medium #40;YELLOW#41;&quot;]
+  sample_simple[&quot;sample_simple #40;GREEN#41;&quot;]
+  sample_medium --&gt;|&quot;work.customer_running_total, work.tier_stats&quot;| sample_downstream
+  sample_simple --&gt;|&quot;work.region_summary&quot;| sample_downstream
+</pre>
+</div>
+<h2>Execution Order</h2>
+<ol class='exec-order'>
+<li><code>sample_complex</code></li>
+<li><code>sample_db_sources</code></li>
+<li><code>sample_medium</code></li>
+<li><code>sample_simple</code></li>
+<li><code>sample_downstream</code></li>
+</ol>
 <h2>Script Inventory</h2>
 <table><thead><tr><th>File</th><th>Tier</th><th>Score</th><th>Lines</th><th>DATA Steps</th><th>PROC SQL</th><th>Macros</th><th>Notes</th></tr></thead><tbody>
 <tr><td>sample_complex.sas</td><td><span class='tier' style='background:#ef4444'>RED</span></td><td>68</td><td>97</td><td>2</td><td>2</td><td>2</td><td>Manual conversion required -- complex logic detected; Large macro 'process_monthly' (64 lines) -- manual review required</td></tr>
 <tr><td>sample_medium.sas</td><td><span class='tier' style='background:#eab308'>YELLOW</span></td><td>30</td><td>46</td><td>2</td><td>0</td><td>0</td><td>Semi-automatable -- review generated code carefully</td></tr>
+<tr><td>sample_db_sources.sas</td><td><span class='tier' style='background:#22c55e'>GREEN</span></td><td>12</td><td>37</td><td>1</td><td>2</td><td>0</td><td>Fully automatable -- straightforward ETL patterns</td></tr>
+<tr><td>sample_downstream.sas</td><td><span class='tier' style='background:#22c55e'>GREEN</span></td><td>7</td><td>13</td><td>2</td><td>0</td><td>0</td><td>Fully automatable -- straightforward ETL patterns</td></tr>
 <tr><td>sample_simple.sas</td><td><span class='tier' style='background:#22c55e'>GREEN</span></td><td>7</td><td>22</td><td>1</td><td>1</td><td>0</td><td>Fully automatable -- straightforward ETL patterns</td></tr>
-<tr><td>sample_proc_sql.sas</td><td><span class='tier' style='background:#22c55e'>GREEN</span></td><td>3</td><td>12</td><td>0</td><td>1</td><td>0</td><td>Fully automatable -- straightforward ETL patterns</td></tr>
 </tbody></table>
 <h2>Orphan Datasets (consumed but never produced)</h2>
 <ul>
-<li><code>lib.customers</code></li>
-<li><code>lib.orders</code></li>
+<li><code>connection</code></li>
+<li><code>db2</code></li>
+<li><code>dbo.orders</code></li>
+<li><code>dwh.customers</code></li>
 <li><code>mylib.customers</code></li>
 <li><code>raw.customer_dim</code></li>
 <li><code>raw.transactions</code></li>
