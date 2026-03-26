@@ -1,0 +1,4 @@
+source_file,output_file,tier,score,success,blocks_converted,blocks_skipped,blocks_failed,manual_review,warnings,errors
+sas_source/sample_complex.sas,glue_jobs/jobs/sample_complex.py,RED,68,False,4,3,4,True,Macro 'process_monthly' skipped -- manual conversion required; RETAIN detected -- verify window function conversion; FIRST./LAST. converted to window functions -- verify correctness; ARRAY construct detected -- manual conversion needed; Complex TRANSPOSE -- manual conversion needed; Macro 'run_all_months' skipped -- manual conversion required; No handler for PROC_APPEND at line 78,
+sas_source/sample_medium.sas,glue_jobs/jobs/sample_medium.py,YELLOW,30,False,3,2,1,True,RETAIN detected -- verify window function conversion; FIRST./LAST. converted to window functions -- verify correctness,
+sas_source/sample_simple.sas,glue_jobs/jobs/sample_simple.py,GREEN,7,True,3,1,0,False,,

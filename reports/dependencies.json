@@ -1,0 +1,25 @@
+{
+  "nodes": [
+    "sas_source/sample_complex.sas",
+    "sas_source/sample_medium.sas",
+    "sas_source/sample_proc_sql.sas",
+    "sas_source/sample_simple.sas"
+  ],
+  "edges": [],
+  "execution_order": [
+    "sas_source/sample_complex.sas",
+    "sas_source/sample_medium.sas",
+    "sas_source/sample_proc_sql.sas",
+    "sas_source/sample_simple.sas"
+  ],
+  "orphan_datasets": [
+    "lib.customers",
+    "lib.orders",
+    "mylib.customers",
+    "raw.customer_dim",
+    "raw.transactions",
+    "ref.products",
+    "sales.orders",
+    "stage.yearly_txns"
+  ]
+}

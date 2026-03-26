@@ -1,0 +1,7 @@
+digraph sas_dependencies {
+  rankdir="LR";
+  "sample_complex";
+  "sample_medium";
+  "sample_proc_sql";
+  "sample_simple";
+}

@@ -275,6 +275,42 @@ Set a CloudWatch Logs retention policy (e.g., 30 days) to cap storage costs. Wit
 - **G.1X vs G.2X:** G.2X doubles the DPU (and cost) per worker but provides 2x memory (16 GB vs 8 GB). Use G.1X unless jobs run out of memory.
 - All prices exclude AWS free-tier credits (first 12 months: 1M Lambda requests, 400K GB-s, 5 GB S3, etc.).
 
+**Cost savings: all-Lambda vs all-Glue**
+
+What if all 700 scripts run on Lambda instead of Glue? Both scenarios assume 700 jobs running once per day (21,000 runs/month).
+
+*Scenario A -- 700 Glue jobs* (5,250 hrs/month at 15 min avg):
+
+| Workers | G.1X monthly | G.2X monthly |
+|---|---|---|
+| 2 workers | **$4,620** | **$9,240** |
+| 5 workers | **$11,550** | **$23,100** |
+| 10 workers | **$23,100** | **$46,200** |
+| 20 workers | **$46,200** | **$92,400** |
+
+*Scenario B -- 700 Lambda functions* (21,000 invocations x 2 GB x 120s = 5,040,000 GB-s):
+
+| Item | Cost |
+|---|---|
+| Compute: 5,040,000 GB-s x $0.0000166667 | **$84** |
+| Requests: 21,000 x $0.20/1M | $0.004 |
+| **Lambda total** | **$84/month** |
+
+*Savings by moving all 700 jobs from Glue to Lambda:*
+
+| Glue config replaced | Monthly saving | % saved | Annual saving |
+|---|---|---|---|
+| 2 workers G.1X ($4,620) | **$4,536** | 98% | **$54,432** |
+| 5 workers G.1X ($11,550) | **$11,466** | 99% | **$137,592** |
+| 10 workers G.1X ($23,100) | **$23,016** | 99.6% | **$276,192** |
+| 20 workers G.1X ($46,200) | **$46,116** | 99.8% | **$553,392** |
+| 2 workers G.2X ($9,240) | **$9,156** | 99% | **$109,872** |
+| 5 workers G.2X ($23,100) | **$23,016** | 99.6% | **$276,192** |
+| 10 workers G.2X ($46,200) | **$46,116** | 99.8% | **$553,392** |
+| 20 workers G.2X ($92,400) | **$92,316** | 99.9% | **$1,107,792** |
+
+**Important caveat:** Lambda has a 15-minute execution timeout and 10 GB memory limit. Scripts processing large datasets (>1 GB) or requiring Spark's distributed processing still need Glue. The real-world optimal split depends on each script's data volume -- the more scripts you can move to Lambda, the closer you get to these savings. Even a 50/50 split (the baseline estimate above) saves 50% of the Glue cost.
+
 **Calculate your own costs:**
 
 - [AWS Pricing Calculator](https://calculator.aws/) -- build a custom estimate for your exact workload
